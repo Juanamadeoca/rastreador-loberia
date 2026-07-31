@@ -17,8 +17,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 🛠️ CORRECCIÓN PARA INTERNET: Guardamos los datos en la carpeta temporal del servidor web
-GPS_FILE = "/tmp/gps_trayecto.txt" if os.name != "nt" else os.path.join(os.path.expanduser("~"), "Desktop", "gps_trayecto.txt")
-CHAT_FILE = "/tmp/gps_mensajes.txt" if os.name != "nt" else os.path.join(os.path.expanduser("~"), "Desktop", "gps_mensajes.txt")
+GPS_FILE = "gps_trayecto.txt"
+CHAT_FILE = "gps_mensajes.txt"
+
 
 lat_casa, lon_casa = -37.7843311149627, -58.848557034507394
 
@@ -31,7 +32,6 @@ if "velocidad" not in st.session_state: st.session_state.velocidad = "0.0 km/h"
 if "altitud" not in st.session_state: st.session_state.altitud = "0 m"
 if "hora_sat" not in st.session_state: st.session_state.hora_sat = "--:--:--"
 if "ultimo_crudo" not in st.session_state: st.session_state.ultimo_crudo = ""
-
 def procesar_cadena_entrante(payload, topico_origen):
     if "ACK" in payload or "PC_VIA_WEB" in payload:
         return
@@ -66,6 +66,7 @@ def procesar_cadena_entrante(payload, topico_origen):
         st.session_state.lat = p_lat
         st.session_state.lon = p_lon
         
+        # 🛰️ Extracción y sanitización con mapeo de índices corregido
         if len(partes) >= 5:
             st.session_state.satelites = "".join([c for c in partes[4] if c.isdigit()]) or "0"
         
@@ -79,6 +80,7 @@ def procesar_cadena_entrante(payload, topico_origen):
             h_raw = partes[7]
             try:
                 h_raw_padded = h_raw.zfill(8)
+                # Cálculo de hora atómica UTC-3 para Argentina
                 hora_utc = int(h_raw_padded[0:2]) - 3
                 if hora_utc < 0: hora_utc += 24
                 st.session_state.hora_sat = f"{hora_utc:02d}:{h_raw_padded[2:4]}:{h_raw_padded[4:6]} (Local)"
@@ -134,7 +136,6 @@ def iniciar_conexion_mqtt():
         return None
 
 client_activo = iniciar_conexion_mqtt()
-
 trayecto = []
 if os.path.exists(GPS_FILE):
     try:
@@ -208,12 +209,27 @@ with col1:
         st.session_state.hora_sat = "--:--:--"
         st.session_state.ultimo_msg = "Historial Vaciado con Éxito"
         st.rerun()
-
 with col2:
+    # Creamos el mapa centrado en la ubicación actual del móvil
     m = folium.Map(location=[st.session_state.lat, st.session_state.lon], zoom_start=16)
-    if len(trayecto) > 1:
-        folium.PolyLine(trayecto, color="blue", weight=6, opacity=0.85).add_to(m)
-    folium.Marker([st.session_state.lat, st.session_state.lon], popup="Camioneta", icon=folium.Icon(color="red", icon="car", prefix="fa")).add_to(m)
     
-    map_key = f"mapa_live_{st.session_state.lat}_{st.session_state.lon}_{len(trayecto)}"
-    st_folium(m, width="100%", height=580, key=map_key)
+    # 🗺️ Dibuja la línea de la ruta histórica si hay más de un punto guardado
+    if len(trayecto) > 1:
+        folium.PolyLine(
+            locations=trayecto,
+            color="#0D47A1",
+            width=5,
+            opacity=0.8,
+            tooltip="Trayecto Recorrido QSO LINK"
+        ).add_to(m)
+    
+    # Añadimos el marcador en tiempo real del auto con un icono de antena/radar
+    folium.Marker(
+        location=[st.session_state.lat, st.session_state.lon],
+        popup=f"Móvil LU3DJA\nVel: {st.session_state.velocidad}\nHora: {st.session_state.hora_sat}",
+        tooltip="Posición Actual",
+        icon=folium.Icon(color="blue", icon="signal", prefix="fa")
+    ).add_to(m)
+    
+    # Renderizado seguro e interactivo del mapa dentro de la web de Streamlit
+    st_folium(m, width="100%", height=600, key="mapa_principal")
