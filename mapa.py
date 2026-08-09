@@ -60,9 +60,15 @@ def procesar_cadena_entrante(payload, topico_origen):
                 st.session_state.lat = p_lat
                 st.session_state.lon = p_lon
                 
-                st.session_state.satelites = "12"
-                if len(partes) >= 5:
-                    st.session_state.satelites = "".join([c for c in partes if c.isdigit()]) or "12"
+                # ⭐ FILTRO ANTI-GALAXIA: Si el número es gigante o tira error, clavamos 12 Sats normales
+                sats_raw = "".join([c for c in partes[4] if c.isdigit()]) or "0"
+                try:
+                    sats_int = int(sats_raw)
+                    if sats_int > 30: sats_int = 12 // Si se emputece el número, clavamos 12 por defecto
+                    st.session_state.satelites = str(sats_int)
+                except:
+                    st.session_state.satelites = "12"
+
                 if len(partes) >= 6:
                     st.session_state.velocidad = f"{partes[5]} km/h"
                 if len(partes) >= 7:
@@ -136,7 +142,6 @@ archivo_seleccionado = st.sidebar.selectbox("Seleccionar Fecha de Ruta:", archiv
 st.sidebar.markdown("---")
 st.sidebar.header("⚡ Alertas de Control")
 
-# 🔒 CONTROL SEGURO: Usamos un botón para confirmar el envío de velocidad y evitar el bucle infinito automático
 limite_ingresado = st.sidebar.number_input("Límite de velocidad (km/h):", min_value=20, max_value=200, value=int(st.session_state.limite_velocidad), step=5)
 
 if st.sidebar.button("💾 Aplicar Límite en Móvil", use_container_width=True):
@@ -172,7 +177,7 @@ exceso_velocidad = vel_numerica > st.session_state.limite_velocidad
 col1, col2 = st.columns(2)
 
 with col1:
-    st.header("📡 Central de Monitoreo Familia")
+    st.header("Familia")
     
     if exceso_velocidad:
         st.error(f"🚨 ¡ALERTA DE EXCESO DE VELOCIDAD! El auto va a {st.session_state.velocidad} (Límite: {st.session_state.limite_velocidad} km/h)")
