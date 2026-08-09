@@ -64,7 +64,7 @@ def procesar_cadena_entrante(payload, topico_origen):
                 sats_raw = "".join([c for c in partes[4] if c.isdigit()]) or "0"
                 try:
                     sats_int = int(sats_raw)
-                    if sats_int > 30: sats_int = 12 // Si se emputece el número, clavamos 12 por defecto
+                    if sats_int > 30: sats_int = 12 # Si se emputece el número, clavamos 12 por defecto
                     st.session_state.satelites = str(sats_int)
                 except:
                     st.session_state.satelites = "12"
