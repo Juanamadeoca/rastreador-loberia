@@ -1,6 +1,6 @@
 import streamlit as st
 import folium
-from streamlit_folium import folium_static  # 🟢 CAMBIO CLAVE: Usamos folium_static para quitar el parpadeo
+from streamlit_folium import st_folium  # Volvemos al componente nativo pero optimizado
 import os
 import paho.mqtt.client as mqtt
 from streamlit_autorefresh import st_autorefresh
@@ -114,7 +114,9 @@ def iniciar_conexion_mqtt():
     except: return None
 
 client_activo = iniciar_conexion_mqtt()
-st_autorefresh(interval=3000, key="global_refresh")
+
+# 🟢 OPTIMIZACIÓN: Refresco cada 4 segundos para darle respiro a la red móvil de la familia
+st_autorefresh(interval=4000, key="global_refresh")
 
 archivos_en_carpeta = os.listdir(".")
 archivos_viajes = sorted([f for f in archivos_en_carpeta if f.startswith("gps_datos_") and f.endswith(".txt")])
@@ -170,7 +172,7 @@ with col1:
     st.write(f"**📍 Coordenadas:** {v_lat:.6f} , {v_lon:.6f}")
     
     if "PANICO" in v_msg.upper() or "PANICO" in v_ultimo_chat.upper():
-        st.error("🚨 **ALERTA DE EMERGENCY:** ¡BOTÓN DE PÁNICO PRESIONADO EN EL MÓVIL!")
+        st.error("🚨 **ALERTA DE EMERGENCIA:** ¡BOTÓN DE PÁNICO PRESIONADO EN EL MÓVIL!")
     else:
         st.info(f"💬 **Último Evento GPS:** {v_msg}")
     
@@ -220,11 +222,17 @@ with col1:
         st.rerun()
 
 with col2:
+    # 🟢 TRUCO DE SPRINT: Creamos un contenedor vacío para inyectar el mapa de forma dinámica
+    contenedor_mapa = st.empty()
+    
     m = folium.Map(location=[v_lat, v_lon], zoom_start=14)
     folium.Marker(location=[lat_casa, lon_casa], popup="Mi Taller", icon=folium.Icon(color="red", icon="home", prefix="fa")).add_to(m)
+    
     if len(trayecto) > 1:
         folium.PolyLine(locations=trayecto, color="#0D47A1", width=5).add_to(m)
+        
     folium.Marker(location=[v_lat, v_lon], popup=f"Móvil LU3DJA\nVel: {v_vel}", icon=folium.Icon(color="blue", icon="car", prefix="fa")).add_to(m)
     
-    # 🟢 SOLUCIÓN AL PARPADEO: folium_static dibuja de forma fija y suave
-    folium_static(m, width=700, height=600)
+    # Inyectamos el mapa adentro del contenedor sin destruir el resto de la pantalla
+    with contenedor_mapa:
+        st_folium(m, width=700, height=600, key="mapa_dinamico")
