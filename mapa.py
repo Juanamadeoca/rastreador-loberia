@@ -19,15 +19,13 @@ st.markdown("""
 fecha_hoy = datetime.now().strftime("%Y_%m_%d")
 GPS_FILE = f"gps_datos_{fecha_hoy}.txt"
 CHAT_FILE = "gps_mensajes.txt"
-ESTADO_FILE = "gps_estado_actual.txt"  # 🟢 Archivo nuevo para que toda la familia lea lo mismo
+ESTADO_FILE = "gps_estado_actual.txt" 
 
 file_lock = threading.Lock()
 lat_casa, lon_casa = -37.7843311149627, -58.848557034507394
 
-# Inicialización de estados locales
 if "limite_velocidad" not in st.session_state: st.session_state.limite_velocidad = 110.0
 
-# 🟢 Función para escribir el estado actual en un archivo compartido
 def guardar_estado_compartido(lat, lon, sats, vel, alt, hora, msg):
     try:
         with file_lock:
@@ -35,7 +33,6 @@ def guardar_estado_compartido(lat, lon, sats, vel, alt, hora, msg):
                 f.write(f"{lat}|{lon}|{sats}|{vel}|{alt}|{hora}|{msg}\n")
     except: pass
 
-# 🟢 Función para que cualquier miembro de la familia lea el estado real actual
 def leer_estado_compartido():
     if os.path.exists(ESTADO_FILE):
         try:
@@ -48,10 +45,8 @@ def leer_estado_compartido():
         except: pass
     return lat_casa, lon_casa, "0", "0.0 km/h", "0 m", "--:--:--", "Sincronizando satélites..."
 
-# Leer datos actuales compartidos de forma global
 v_lat, v_lon, v_sats, v_vel, v_alt, v_hora, v_msg = leer_estado_compartido()
 
-# Cargar el último chat de forma global para todos
 v_ultimo_chat = "Sin mensajes nuevos"
 if os.path.exists(CHAT_FILE):
     try:
@@ -79,7 +74,6 @@ def procesar_cadena_entrante(payload, topico_origen):
                 p_alt = f"{partes[6]} msnm" if len(partes) >= 7 else "0 m"
                 p_hora = datetime.now().strftime("%H:%M:%S") + " (Local)"
                 
-                # Guardamos en el archivo persistente para toda la familia
                 guardar_estado_compartido(p_lat, p_lon, p_sats, p_vel, p_alt, p_hora, "📡 Central Sincronizada OK")
                 
                 with file_lock:
@@ -122,7 +116,6 @@ def iniciar_conexion_mqtt():
 client_activo = iniciar_conexion_mqtt()
 st_autorefresh(interval=3000, key="global_refresh")
 
-# Barra lateral
 archivos_en_carpeta = os.listdir(".")
 archivos_viajes = sorted([f for f in archivos_en_carpeta if f.startswith("gps_datos_") and f.endswith(".txt")])
 st.sidebar.header("📂 Historial de Viajes")
@@ -138,7 +131,6 @@ if st.sidebar.button("💾 Aplicar Límite en Móvil", use_container_width=True)
         client_activo.publish("qsolink/pc/comandos", f"VEL_LIMIT:{limite_ingresado} PC_VIA_WEB")
         st.sidebar.success(f"¡Límite {limite_ingresado} km/h enviado!")
 
-# Cargar Trayecto
 trayecto = []
 archivo_a_cargar = archivo_seleccionado if archivo_seleccionado else GPS_FILE
 if os.path.exists(archivo_a_cargar):
@@ -185,7 +177,6 @@ with col1:
     st.markdown("---")
     st.success(f"📱 **Último Chat desde el Auto:** {v_ultimo_chat}")
     
-    # 🟢 CASILLERO DE ENVIAR: Disponible siempre para toda la familia
     mensaje_a_enviar = st.text_input("Enviar Mensaje al Móvil:", placeholder="Escribe aquí...", key="input_msg")
 
     if st.button("📤 Transmitir Mensaje", use_container_width=True):
@@ -218,6 +209,14 @@ with col1:
             with file_lock:
                 if os.path.exists(GPS_FILE): os.remove(GPS_FILE)
                 if os.path.exists(ESTADO_FILE): os.remove(ESTADO_FILE)
+        except: pass
+        st.rerun()
+        
+    # 🟢 BOTÓN AGREGADO: Vaciar Historial de Chats para toda la familia
+    if st.button("🗑️ Vaciar Historial de Chats", use_container_width=True):
+        try:
+            with file_lock:
+                if os.path.exists(CHAT_FILE): os.remove(CHAT_FILE)
         except: pass
         st.rerun()
 
