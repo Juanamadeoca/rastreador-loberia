@@ -1,6 +1,6 @@
 import streamlit as st
 import folium
-from streamlit_folium import st_folium
+from streamlit_folium import folium_static  # 🟢 CAMBIO CLAVE: Usamos folium_static para quitar el parpadeo
 import os
 import paho.mqtt.client as mqtt
 from streamlit_autorefresh import st_autorefresh
@@ -170,7 +170,7 @@ with col1:
     st.write(f"**📍 Coordenadas:** {v_lat:.6f} , {v_lon:.6f}")
     
     if "PANICO" in v_msg.upper() or "PANICO" in v_ultimo_chat.upper():
-        st.error("🚨 **ALERTA DE EMERGENCIA:** ¡BOTÓN DE PÁNICO PRESIONADO EN EL MÓVIL!")
+        st.error("🚨 **ALERTA DE EMERGENCY:** ¡BOTÓN DE PÁNICO PRESIONADO EN EL MÓVIL!")
     else:
         st.info(f"💬 **Último Evento GPS:** {v_msg}")
     
@@ -212,7 +212,6 @@ with col1:
         except: pass
         st.rerun()
         
-    # 🟢 BOTÓN AGREGADO: Vaciar Historial de Chats para toda la familia
     if st.button("🗑️ Vaciar Historial de Chats", use_container_width=True):
         try:
             with file_lock:
@@ -226,4 +225,6 @@ with col2:
     if len(trayecto) > 1:
         folium.PolyLine(locations=trayecto, color="#0D47A1", width=5).add_to(m)
     folium.Marker(location=[v_lat, v_lon], popup=f"Móvil LU3DJA\nVel: {v_vel}", icon=folium.Icon(color="blue", icon="car", prefix="fa")).add_to(m)
-    st_folium(m, width="100%", height=600, key="mapa_principal")
+    
+    # 🟢 SOLUCIÓN AL PARPADEO: folium_static dibuja de forma fija y suave
+    folium_static(m, width=700, height=600)
