@@ -1,6 +1,6 @@
 import streamlit as st
 import folium
-from streamlit_folium import st_folium  # Volvemos al componente nativo pero optimizado
+from streamlit_folium import st_folium
 import os
 import paho.mqtt.client as mqtt
 from streamlit_autorefresh import st_autorefresh
@@ -114,14 +114,23 @@ def iniciar_conexion_mqtt():
     except: return None
 
 client_activo = iniciar_conexion_mqtt()
+st_autorefresh(interval=3000, key="global_refresh")
 
-# 🟢 OPTIMIZACIÓN: Refresco cada 4 segundos para darle respiro a la red móvil de la familia
-st_autorefresh(interval=4000, key="global_refresh")
+# --- VARIABLES PARA QUE EL MAPA NO PARPADEE ---
+if "map_zoom" not in st.session_state: st.session_state.map_zoom = 14
+if "map_center" not in st.session_state: st.session_state.map_center = [v_lat, v_lon]
 
+# --- AQUÍ DEFINIMOS HISTORIAL DE VIAJES Y ALERTAS ORIGINALES ---
 archivos_en_carpeta = os.listdir(".")
 archivos_viajes = sorted([f for f in archivos_en_carpeta if f.startswith("gps_datos_") and f.endswith(".txt")])
 st.sidebar.header("📂 Historial de Viajes")
 archivo_seleccionado = st.sidebar.selectbox("Seleccionar Fecha de Ruta:", archivos_viajes, index=archivos_viajes.index(GPS_FILE) if GPS_FILE in archivos_viajes else 0)
+
+# Botón para volver a centrar la cámara en el auto si te moviste lejos
+if st.sidebar.button("🎯 Centrar en el Móvil", use_container_width=True):
+    st.session_state.map_center = [v_lat, v_lon]
+    st.session_state.map_zoom = 14
+    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚡ Alertas de Control")
@@ -132,7 +141,7 @@ if st.sidebar.button("💾 Aplicar Límite en Móvil", use_container_width=True)
     if client_activo is not None:
         client_activo.publish("qsolink/pc/comandos", f"VEL_LIMIT:{limite_ingresado} PC_VIA_WEB")
         st.sidebar.success(f"¡Límite {limite_ingresado} km/h enviado!")
-
+# --- CARGAR TRAYECTORIA ORIGINAL ---
 trayecto = []
 archivo_a_cargar = archivo_seleccionado if archivo_seleccionado else GPS_FILE
 if os.path.exists(archivo_a_cargar):
@@ -154,6 +163,7 @@ try: vel_numerica = float(v_vel.replace(" km/h", "").strip())
 except: vel_numerica = 0.0
 exceso_velocidad = vel_numerica > st.session_state.limite_velocidad
 
+# --- INTERFAZ ORIGINAL (COL1 Y COL2) ---
 col1, col2 = st.columns(2)
 
 with col1:
@@ -222,17 +232,28 @@ with col1:
         st.rerun()
 
 with col2:
-    # 🟢 TRUCO DE SPRINT: Creamos un contenedor vacío para inyectar el mapa de forma dinámica
-    contenedor_mapa = st.empty()
+    # El mapa ahora lee tu posición guardada en la sesión para evitar el parpadeo
+    m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
     
-    m = folium.Map(location=[v_lat, v_lon], zoom_start=14)
     folium.Marker(location=[lat_casa, lon_casa], popup="Mi Taller", icon=folium.Icon(color="red", icon="home", prefix="fa")).add_to(m)
-    
     if len(trayecto) > 1:
         folium.PolyLine(locations=trayecto, color="#0D47A1", width=5).add_to(m)
-        
     folium.Marker(location=[v_lat, v_lon], popup=f"Móvil LU3DJA\nVel: {v_vel}", icon=folium.Icon(color="blue", icon="car", prefix="fa")).add_to(m)
     
-    # Inyectamos el mapa adentro del contenedor sin destruir el resto de la pantalla
-    with contenedor_mapa:
-        st_folium(m, width=700, height=600, key="mapa_dinamico")
+    # Renderizamos de forma estable pasándole center y zoom fijados
+    map_data = st_folium(
+        m, 
+        width="100%", 
+        height=600, 
+        key="mapa_principal",
+        center=st.session_state.map_center,
+        zoom=st.session_state.map_zoom,
+        returned_objects=["zoom", "center"]
+    )
+    
+    # Capturamos si moviste el mapa de forma manual
+    if map_data is not None:
+        if map_data.get("zoom") is not None:
+            st.session_state.map_zoom = map_data["zoom"]
+        if map_data.get("center") is not None:
+            st.session_state.map_center = [map_data["center"]["lat"], map_data["center"]["lng"]]
