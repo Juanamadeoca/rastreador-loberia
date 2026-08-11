@@ -60,28 +60,15 @@ def procesar_cadena_entrante(payload, topico_origen):
                 st.session_state.lat = p_lat
                 st.session_state.lon = p_lon
                 
-                # ⭐ FILTRO ANTI-GALAXIA: Si el número es gigante o tira error, clavamos 12 Sats normales
-                sats_raw = "".join([c for c in partes[4] if c.isdigit()]) or "0"
-                try:
-                    sats_int = int(sats_raw)
-                    if sats_int > 30: sats_int = 12 # Si se emputece el número, clavamos 12 por defecto
-                    st.session_state.satelites = str(sats_int)
-                except:
-                    st.session_state.satelites = "12"
-
+                if len(partes) >= 5:
+                    st.session_state.satelites = partes[4]
                 if len(partes) >= 6:
                     st.session_state.velocidad = f"{partes[5]} km/h"
                 if len(partes) >= 7:
                     st.session_state.altitud = f"{partes[6]} msnm"
-                if len(partes) >= 8:
-                    h_raw = partes[7]
-                    try:
-                        h_raw_padded = h_raw.zfill(8)
-                        hora_utc = int(h_raw_padded[0:2]) - 3
-                        if hora_utc < 0: hora_utc += 24
-                        st.session_state.hora_sat = f"{hora_utc:02d}:{h_raw_padded[2:4]}:{h_raw_padded[4:6]} (Local)"
-                    except:
-                        st.session_state.hora_sat = "--:--:--"
+                
+                # ⏰ SOLUCIÓN RELOJ: Toma la hora de Windows al recibir el dato, infalible y exacta
+                st.session_state.hora_sat = datetime.now().strftime("%H:%M:%S") + " (Local)"
 
                 st.session_state.ultimo_msg = "📡 Central Sincronizada OK"
                 
@@ -177,7 +164,7 @@ exceso_velocidad = vel_numerica > st.session_state.limite_velocidad
 col1, col2 = st.columns(2)
 
 with col1:
-    st.header("Familia")
+    st.header("📡 Central de Monitoreo Familia")
     
     if exceso_velocidad:
         st.error(f"🚨 ¡ALERTA DE EXCESO DE VELOCIDAD! El auto va a {st.session_state.velocidad} (Límite: {st.session_state.limite_velocidad} km/h)")
