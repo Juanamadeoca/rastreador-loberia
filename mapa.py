@@ -3,7 +3,6 @@ import folium
 from streamlit_folium import st_folium
 import os
 import paho.mqtt.client as mqtt
-from streamlit_autorefresh import st_autorefresh
 from datetime import datetime
 import threading
 from streamlit.runtime.scriptrunner import add_script_run_ctx
@@ -13,6 +12,9 @@ st.set_page_config(page_title="Rastreador Satelital QSO LINK", layout="wide")
 st.markdown("""
     <style>
         .block-container { padding-top: 1rem !important; padding-bottom: 0rem !important; padding-left: 2rem !important; padding-right: 2rem !important; }
+        @media (max-width: 800px) {
+            .stRemoteComponent { min-height: 400px !important; }
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -47,15 +49,9 @@ def leer_estado_compartido():
 
 v_lat, v_lon, v_sats, v_vel, v_alt, v_hora, v_msg = leer_estado_compartido()
 
-v_ultimo_chat = "Sin mensajes nuevos"
-if os.path.exists(CHAT_FILE):
-    try:
-        with file_lock:
-            with open(CHAT_FILE, "r", encoding="utf-8") as f:
-                lineas = f.readlines()
-        if lineas:
-            v_ultimo_chat = lineas[-1].strip()
-    except: pass
+# --- MEMORIA DE ENCUADRE ---
+if "map_zoom" not in st.session_state: st.session_state.map_zoom = 14
+if "map_center" not in st.session_state: st.session_state.map_center = [v_lat, v_lon]
 
 def procesar_cadena_entrante(payload, topico_origen):
     if "ACK" in payload or "PC_VIA_WEB" in payload:
@@ -114,22 +110,17 @@ def iniciar_conexion_mqtt():
     except: return None
 
 client_activo = iniciar_conexion_mqtt()
-st_autorefresh(interval=3000, key="global_refresh")
 
-# --- VARIABLES PARA QUE EL MAPA NO PARPADEE ---
-if "map_zoom" not in st.session_state: st.session_state.map_zoom = 14
-if "map_center" not in st.session_state: st.session_state.map_center = [v_lat, v_lon]
-
-# --- AQUÍ DEFINIMOS HISTORIAL DE VIAJES Y ALERTAS ORIGINALES ---
+# --- BARRA LATERAL RESTAURADA AL 100% ---
 archivos_en_carpeta = os.listdir(".")
 archivos_viajes = sorted([f for f in archivos_en_carpeta if f.startswith("gps_datos_") and f.endswith(".txt")])
 st.sidebar.header("📂 Historial de Viajes")
 archivo_seleccionado = st.sidebar.selectbox("Seleccionar Fecha de Ruta:", archivos_viajes, index=archivos_viajes.index(GPS_FILE) if GPS_FILE in archivos_viajes else 0)
 
-# Botón para volver a centrar la cámara en el auto si te moviste lejos
+# RESTAURADO: Botón original de centrado
 if st.sidebar.button("🎯 Centrar en el Móvil", use_container_width=True):
     st.session_state.map_center = [v_lat, v_lon]
-    st.session_state.map_zoom = 14
+    st.session_state.map_zoom = 15
     st.rerun()
 
 st.sidebar.markdown("---")
@@ -141,119 +132,142 @@ if st.sidebar.button("💾 Aplicar Límite en Móvil", use_container_width=True)
     if client_activo is not None:
         client_activo.publish("qsolink/pc/comandos", f"VEL_LIMIT:{limite_ingresado} PC_VIA_WEB")
         st.sidebar.success(f"¡Límite {limite_ingresado} km/h enviado!")
-# --- CARGAR TRAYECTORIA ORIGINAL ---
-trayecto = []
-archivo_a_cargar = archivo_seleccionado if archivo_seleccionado else GPS_FILE
-if os.path.exists(archivo_a_cargar):
-    try:
-        with file_lock:
-            with open(archivo_a_cargar, "r", encoding="utf-8") as f:
-                for linea in f:
-                    linea = linea.strip()
-                    if not linea: continue
-                    p_partes = linea.split(",")
-                    if len(p_partes) == 2:
-                        trayecto.append([float(p_partes[0]), float(p_partes[1])])
-    except: pass
-
-if not trayecto:
-    trayecto.append([v_lat, v_lon])
-
-try: vel_numerica = float(v_vel.replace(" km/h", "").strip())
-except: vel_numerica = 0.0
-exceso_velocidad = vel_numerica > st.session_state.limite_velocidad
-
-# --- INTERFAZ ORIGINAL (COL1 Y COL2) ---
-col1, col2 = st.columns(2)
-
-with col1:
-    st.header("📡 Central de Monitoreo Familia")
-    if exceso_velocidad:
-        st.error(f"🚨 ¡ALERTA DE EXCESO DE VELOCIDAD! El auto va a {v_vel} (Límite: {st.session_state.limite_velocidad} km/h)")
-
-    m_col1, m_col2 = st.columns(2)
-    with m_col1:
-        st.metric(label="🛰️ Satélites Activos", value=f"{v_sats} Sats")
-        st.metric(label="🏔️ Altitud", value=v_alt)
-    with m_col2:
-        st.metric(label="⚡ Velocidad GPS", value=v_vel, delta="¡Exceso!" if exceso_velocidad else None, delta_color="inverse" if exceso_velocidad else "normal")
-        st.metric(label="⏰ Sincronización", value=v_hora)
-        
-    st.write(f"**📍 Coordenadas:** {v_lat:.6f} , {v_lon:.6f}")
+# --- FRAGMENTO ASÍNCRONO ANTI-PARPADEO ---
+@st.fragment(run_every=2)
+def central_monitoreo_asincrona():
+    # Cargar variables del vehículo actualizadas
+    c_lat, c_lon, c_sats, c_vel, c_alt, c_hora, c_msg = leer_estado_compartido()
     
-    if "PANICO" in v_msg.upper() or "PANICO" in v_ultimo_chat.upper():
-        st.error("🚨 **ALERTA DE EMERGENCIA:** ¡BOTÓN DE PÁNICO PRESIONADO EN EL MÓVIL!")
-    else:
-        st.info(f"💬 **Último Evento GPS:** {v_msg}")
-    
-    st.markdown("---")
-    st.success(f"📱 **Último Chat desde el Auto:** {v_ultimo_chat}")
-    
-    mensaje_a_enviar = st.text_input("Enviar Mensaje al Móvil:", placeholder="Escribe aquí...", key="input_msg")
-
-    if st.button("📤 Transmitir Mensaje", use_container_width=True):
-        if mensaje_a_enviar.strip() and client_activo is not None:
-            texto_enviar = mensaje_a_enviar.strip()
-            payload_camuflado = f"{texto_enviar} PC_VIA_WEB"
-            client_activo.publish("qsolink/pc/comandos", payload_camuflado)
-            
-            ahora_actual = datetime.now().strftime("%H:%M:%S")
-            try:
-                with file_lock:
-                    with open(CHAT_FILE, "a", encoding="utf-8") as f:
-                        f.write(f"[{ahora_actual}] Yo (PC): {texto_enviar}\n")
-            except: pass
-            st.rerun()
-            
-    st.markdown("#### 📝 Historial Reciente de Mensajes")
+    # CORREGIDO: Espacios perfectamente alineados con el resto de la función
+    c_ultimo_chat = "Sin mensajes nuevos del móvil"
     if os.path.exists(CHAT_FILE):
         try:
             with file_lock:
                 with open(CHAT_FILE, "r", encoding="utf-8") as f:
-                    lineas_chat = f.readlines()
-            for l in reversed(lineas_chat[-6:]):
-                st.text(l.strip())
+                    lineas = f.readlines()
+            for linea in reversed(lineas):
+                if "Móvil:" in linea:
+                    c_ultimo_chat = linea.strip()
+                    break
         except: pass
-            
-    st.markdown("---")
-    if st.button("🗑️ Vaciar Mapa de Hoy", use_container_width=True):
-        try:
-            with file_lock:
-                if os.path.exists(GPS_FILE): os.remove(GPS_FILE)
-                if os.path.exists(ESTADO_FILE): os.remove(ESTADO_FILE)
-        except: pass
-        st.rerun()
-        
-    if st.button("🗑️ Vaciar Historial de Chats", use_container_width=True):
-        try:
-            with file_lock:
-                if os.path.exists(CHAT_FILE): os.remove(CHAT_FILE)
-        except: pass
-        st.rerun()
 
-with col2:
-    # El mapa ahora lee tu posición guardada en la sesión para evitar el parpadeo
-    m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
-    
-    folium.Marker(location=[lat_casa, lon_casa], popup="Mi Taller", icon=folium.Icon(color="red", icon="home", prefix="fa")).add_to(m)
-    if len(trayecto) > 1:
-        folium.PolyLine(locations=trayecto, color="#0D47A1", width=5).add_to(m)
-    folium.Marker(location=[v_lat, v_lon], popup=f"Móvil LU3DJA\nVel: {v_vel}", icon=folium.Icon(color="blue", icon="car", prefix="fa")).add_to(m)
-    
-    # Renderizamos de forma estable pasándole center y zoom fijados
-    map_data = st_folium(
-        m, 
-        width="100%", 
-        height=600, 
-        key="mapa_principal",
-        center=st.session_state.map_center,
-        zoom=st.session_state.map_zoom,
-        returned_objects=["zoom", "center"]
-    )
-    
-    # Capturamos si moviste el mapa de forma manual
-    if map_data is not None:
-        if map_data.get("zoom") is not None:
-            st.session_state.map_zoom = map_data["zoom"]
-        if map_data.get("center") is not None:
-            st.session_state.map_center = [map_data["center"]["lat"], map_data["center"]["lng"]]
+    # Cargar los datos del recorrido paso a paso
+    trayecto = []
+    archivo_a_cargar = archivo_seleccionado if archivo_seleccionado else GPS_FILE
+    if os.path.exists(archivo_a_cargar):
+        try:
+            with file_lock:
+                with open(archivo_a_cargar, "r", encoding="utf-8") as f:
+                    for linea in f:
+                        linea = linea.strip()
+                        if not linea: continue
+                        p_partes = linea.split(",")
+                        if len(p_partes) == 2:
+                            trayecto.append([float(p_partes[0]), float(p_partes[1])])
+        except: pass
+
+    if not trayecto:
+        trayecto.append([c_lat, c_lon])
+
+    try: vel_numerica = float(c_vel.replace(" km/h", "").strip())
+    except: vel_numerica = 0.0
+    exceso_velocidad = vel_numerica > st.session_state.limite_velocidad
+
+    # Estructura visual de dos columnas en pantalla
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.header("📡 Central de Monitoreo Familia")
+        if exceso_velocidad:
+            st.error(f"🚨 ¡ALERTA DE EXCESO DE VELOCIDAD! El auto va a {c_vel} (Límite: {st.session_state.limite_velocidad} km/h)")
+
+        m_col1, m_col2 = st.columns(2)
+        with m_col1:
+            st.metric(label="🛰️ Satélites Activos", value=f"{c_sats} Sats")
+            st.metric(label="🏔️ Altitud", value=c_alt)
+        with m_col2:
+            st.metric(label="⚡ Velocidad GPS", value=c_vel, delta="¡Exceso!" if exceso_velocidad else None, delta_color="inverse" if exceso_velocidad else "normal")
+            st.metric(label="⏰ Sincronización", value=c_hora)
+            
+        st.write(f"**📍 Coordenadas:** {c_lat:.6f} , {c_lon:.6f}")
+
+        
+        if "PANICO" in c_msg.upper() or "PANICO" in c_ultimo_chat.upper():
+            st.error("🚨 **ALERTA DE EMERGENCIA:** ¡BOTÓN DE PÁNICO PRESIONADO EN EL MÓVIL!")
+        else:
+            st.info(f"💬 **Último Evento GPS:** {c_msg}")
+        
+        st.markdown("---")
+        st.success(f"📱 **Último Chat desde el Auto:** {c_ultimo_chat}")
+        
+        mensaje_a_enviar = st.text_input("Enviar Mensaje al Móvil:", placeholder="Escribe aquí...", key="input_msg")
+
+        if st.button("📤 Transmitir Mensaje", use_container_width=True):
+            if mensaje_a_enviar.strip() and client_activo is not None:
+                texto_enviar = mensaje_a_enviar.strip()
+                payload_camuflado = f"{texto_enviar} PC_VIA_WEB"
+                client_activo.publish("qsolink/pc/comandos", payload_camuflado)
+                
+                ahora_actual = datetime.now().strftime("%H:%M:%S")
+                try:
+                    with file_lock:
+                        with open(CHAT_FILE, "a", encoding="utf-8") as f:
+                            f.write(f"[{ahora_actual}] Yo (PC): {texto_enviar}\n")
+                except: pass
+                st.rerun()
+                
+        st.markdown("#### 📝 Historial Reciente de Mensajes")
+        if os.path.exists(CHAT_FILE):
+            try:
+                with file_lock:
+                    with open(CHAT_FILE, "r", encoding="utf-8") as f:
+                        lineas_chat = f.readlines()
+                for l in reversed(lineas_chat[-6:]):
+                    st.text(l.strip())
+            except: pass
+                
+        st.markdown("---")
+        # RESTAURADO: Botón de vaciar mapa original
+        if st.button("🗑️ Vaciar Mapa de Hoy", use_container_width=True):
+            try:
+                with file_lock:
+                    if os.path.exists(GPS_FILE): os.remove(GPS_FILE)
+                    if os.path.exists(ESTADO_FILE): os.remove(ESTADO_FILE)
+            except: pass
+            st.rerun()
+            
+        # RESTAURADO: Botón de vaciar chat original
+        if st.button("🗑️ Vaciar Historial de Chats", use_container_width=True):
+            try:
+                with file_lock:
+                    if os.path.exists(CHAT_FILE): os.remove(CHAT_FILE)
+            except: pass
+            st.rerun()
+
+    with col2:
+        m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
+        
+        folium.Marker(location=[lat_casa, lon_casa], popup="Mi Taller", icon=folium.Icon(color="red", icon="home", prefix="fa")).add_to(m)
+        
+        # DIBUJO DEL RECORRIDO EN VIVO PASO A PASO
+        if len(trayecto) > 1:
+            folium.PolyLine(locations=trayecto, color="#0D47A1", width=5).add_to(m)
+            
+        folium.Marker(location=[c_lat, c_lon], popup=f"Móvil LU3DJA\nVel: {c_vel}", icon=folium.Icon(color="blue", icon="car", prefix="fa")).add_to(m)
+        
+        map_data = st_folium(
+            m, 
+            width="100%", 
+            height=500, 
+            key="mapa_principal",
+            returned_objects=["zoom", "center"]
+        )
+        
+        if map_data is not None:
+            if map_data.get("zoom") is not None:
+                st.session_state.map_zoom = map_data["zoom"]
+            if map_data.get("center") is not None:
+                st.session_state.map_center = [map_data["center"]["lat"], map_data["center"]["lng"]]
+
+# Ejecución de la central
+central_monitoreo_asincrona()
