@@ -6,6 +6,8 @@ import paho.mqtt.client as mqtt
 from datetime import datetime
 import threading
 from streamlit.runtime.scriptrunner import add_script_run_ctx
+# ⏰ EL ANCLA HORARIA: Para obligar al servidor de internet a dar la hora de Argentina
+from zoneinfo import ZoneInfo
 
 st.set_page_config(page_title="Rastreador Satelital QSO LINK", layout="wide")
 
@@ -18,7 +20,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-fecha_hoy = datetime.now().strftime("%Y_%m_%d")
+# Clava la fecha del archivo según el huso horario real
+fecha_hoy = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).strftime("%Y_%m_%d")
 GPS_FILE = f"gps_datos_{fecha_hoy}.txt"
 CHAT_FILE = "gps_mensajes.txt"
 ESTADO_FILE = "gps_estado_actual.txt" 
@@ -65,7 +68,9 @@ def procesar_cadena_entrante(payload, topico_origen):
                 p_sats = partes[4] if len(partes) >= 5 else "0"
                 p_vel = f"{partes[5]} km/h" if len(partes) >= 6 else "0.0 km/h"
                 p_alt = f"{partes[6]} m" if len(partes) >= 7 else "0 m"
-                p_hora = datetime.now().strftime("%H:%M:%S")
+                
+                # 🟢 REPARACIÓN EXTENSA: Sincroniza la hora al reloj de Buenos Aires de prepo
+                p_hora = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).strftime("%H:%M:%S")
                 
                 guardar_estado_compartido(p_lat, p_lon, p_sats, p_vel, p_alt, p_hora, "📡 Central Sincronizada OK")
                 
@@ -76,7 +81,7 @@ def procesar_cadena_entrante(payload, topico_origen):
 
     if topico_origen == "qsolink/auto/chat":
         msg_limpio = payload_saneado.replace("LU3DJA:", "").strip()
-        ahora_str = datetime.now().strftime("%H:%M:%S")
+        ahora_str = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).strftime("%H:%M:%S")
         with file_lock:
             with open(CHAT_FILE, "a", encoding="utf-8") as f:
                 f.write(f"[{ahora_str}] Móvil: {msg_limpio}\n")
@@ -132,9 +137,10 @@ if st.sidebar.button("💾 Aplicar Límite en Móvil", use_container_width=True)
         client_activo.publish("qsolink/pc/comandos", f"VEL_LIMIT:{limite_ingresado} PC_VIA_WEB")
         st.sidebar.success(f"¡Límite {limite_ingresado} km/h enviado!")
 
-# --- ⏱️ PANTALLA GENERAL CON EL MOTOR REPARADO ---
+# --- DISEÑO EN DOS COLUMNAS LIMPIAS ---
 col_izquierda, col_derecha = st.columns(2)
 
+# ⏱️ EL MARCAPASOS EXCLUSIVO DE DATOS PARA LA WEB DEL TELÉFONO
 with col_izquierda:
     @st.fragment(run_every=2)
     def renderizar_datos_dinamicos():
@@ -182,7 +188,7 @@ with col_izquierda:
             if mensaje_enviar.strip() and client_activo is not None:
                 texto_enviar = mensaje_enviar.strip()
                 client_activo.publish("qsolink/pc/comandos", f"{texto_enviar} PC_VIA_WEB")
-                ahora_actual = datetime.now().strftime("%H:%M:%S")
+                ahora_actual = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).strftime("%H:%M:%S")
                 try:
                     with file_lock:
                         with open(CHAT_FILE, "a", encoding="utf-8") as f:
@@ -201,8 +207,8 @@ with col_izquierda:
 
     renderizar_datos_dinamicos()
 
+# 🗺️ LA COLUMNA DEL MAPA FIJO PARA LA WEB (Dibuja la ruta sin parpadear)
 with col_derecha:
-    lat_act, lon_act, _, vel_act, _, _, _ = leer_estado_compartido()
     trayecto = []
     archivo_cargar = archivo_seleccionado if archivo_seleccionado else GPS_FILE
     if os.path.exists(archivo_cargar):
@@ -214,19 +220,18 @@ with col_derecha:
                         if not linea: continue
                         p_partes = linea.split(",")
                         if len(p_partes) == 2:
-                            trayecto.append([float(p_partes[0]), float(p_partes[1])])
+                            trayecto.append([float(p_partes), float(p_partes)])
         except: pass
 
-    if not trayecto: trayecto.append([lat_act, lon_act])
+    if not trayecto: trayecto.append([v_lat, v_lon])
 
-    # 🟢 REPARADO: El mapa lee lat_act y lon_act directo sin tildarse
     m = folium.Map(location=st.session_state.map_center, zoom_start=st.session_state.map_zoom)
     folium.Marker(location=[lat_casa, lon_casa], popup="Mi Taller", icon=folium.Icon(color="red", icon="home", prefix="fa")).add_to(m)
     
     if len(trayecto) > 1:
         folium.PolyLine(locations=trayecto, color="#0D47A1", width=5).add_to(m)
         
-    folium.Marker(location=[lat_act, lon_act], popup=f"Móvil LU3DJA\nVel: {vel_act}", icon=folium.Icon(color="blue", icon="car", prefix="fa")).add_to(m)
+    folium.Marker(location=[v_lat, v_lon], popup=f"Móvil LU3DJA\nVel: {v_vel}", icon=folium.Icon(color="blue", icon="car", prefix="fa")).add_to(m)
     
     map_data = st_folium(m, width="100%", height=500, key="mapa_principal", returned_objects=["zoom", "center"])
     
